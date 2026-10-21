@@ -1,0 +1,116 @@
+name: Build Android APK
+on:
+  push:
+    paths: ['.github/workflows/android.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Prepare offline Android application
+        shell: bash
+        run: |
+          mkdir -p android/app/src/main/java/io/github/xtarneedx/tarneeb android/app/src/main/assets android/app/src/main/res/drawable
+          cp index.html android/app/src/main/assets/index.html
+          cat > android/settings.gradle <<'END'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = 'Tarneeb'
+          include ':app'
+          END
+          cat > android/build.gradle <<'END'
+          plugins { id 'com.android.application' version '8.7.3' apply false }
+          END
+          cat > android/app/build.gradle <<'END'
+          plugins { id 'com.android.application' }
+          android {
+            namespace 'io.github.xtarneedx.tarneeb'
+            compileSdk 35
+            defaultConfig {
+              applicationId 'io.github.xtarneedx.tarneeb.beta'
+              minSdk 23
+              targetSdk 35
+              versionCode 1
+              versionName '1.0-beta'
+            }
+            buildTypes { debug { debuggable false } }
+          }
+          END
+          cat > android/app/src/main/AndroidManifest.xml <<'END'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <application android:label="حسبة الطرنيب" android:icon="@drawable/icon" android:allowBackup="false" android:supportsRtl="true" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false">
+              <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
+                <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+              </activity>
+            </application>
+          </manifest>
+          END
+          cat > android/app/src/main/res/drawable/icon.xml <<'END'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+            <path android:fillColor="#163D32" android:pathData="M0,0h108v108h-108z"/>
+            <path android:fillColor="#E9C675" android:pathData="M54,20C43,36 25,43 25,57C25,72 43,76 51,64L46,85L62,85L57,64C65,76 83,72 83,57C83,43 65,36 54,20Z"/>
+          </vector>
+          END
+          cat > android/app/src/main/java/io/github/xtarneedx/tarneeb/MainActivity.java <<'END'
+          package io.github.xtarneedx.tarneeb;
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.webkit.*;
+          import android.widget.FrameLayout;
+          import java.io.*;
+          public class MainActivity extends Activity {
+            private WebView web;
+            @Override public void onCreate(Bundle saved) {
+              super.onCreate(saved);
+              FrameLayout root = new FrameLayout(this);
+              root.setBackgroundColor(0xff122e29);
+              root.setOnApplyWindowInsetsListener((v,insets)->{
+                v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());
+                return insets;
+              });
+              web=new WebView(this);
+              root.addView(web,new FrameLayout.LayoutParams(-1,-1));
+              setContentView(root);
+              web.getSettings().setJavaScriptEnabled(true);
+              web.getSettings().setDomStorageEnabled(true);
+              web.getSettings().setAllowFileAccess(false);
+              web.getSettings().setAllowContentAccess(false);
+              web.setWebChromeClient(new WebChromeClient());
+              web.setWebViewClient(new WebViewClient(){
+                @Override public boolean shouldOverrideUrlLoading(WebView view,String url){return true;}
+                @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request){return true;}
+              });
+              try {
+                InputStream input=getAssets().open("index.html");
+                ByteArrayOutputStream buffer=new ByteArrayOutputStream();
+                byte[] bytes=new byte[8192]; int n;
+                while((n=input.read(bytes))!=-1)buffer.write(bytes,0,n);
+                input.close();
+                web.loadDataWithBaseURL("https://tarneeb.local/",buffer.toString("UTF-8"),"text/html","UTF-8",null);
+              }catch(IOException e){throw new RuntimeException(e);}
+            }
+            @Override protected void onDestroy(){web.destroy();super.onDestroy();}
+          }
+          END
+      - name: Build and verify APK
+        run: |
+          gradle -p android assembleDebug --no-daemon
+          cp android/app/build/outputs/apk/debug/app-debug.apk Tarneeb-Android-beta.apk
+          sha256sum Tarneeb-Android-beta.apk > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tarneeb-Android-beta
+          path: |
+            Tarneeb-Android-beta.apk
+            SHA256SUMS.txt
+          retention-days: 30
